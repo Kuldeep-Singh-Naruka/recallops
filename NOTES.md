@@ -1,7 +1,7 @@
 # My build notes
 
-Short notes after each step — what I built and why.
-
 ## Step 0 — Setup
-- Created a virtual env (`.venv`) for the project so packages stay local, not global.
-- Created a docker compose file to run FalkorDB (6379 = database, 3000 = Browser UI). Data is kept in a volume so memory survives restarts.
+- Project venv + docker compose for FalkorDB (data kept in a volume).
+
+## Step 1 — Connect + seed
+- `db.py` connects, one graph per tenant; `seed.py` adds the service map using `MERGE` to avoid duplicates.
