@@ -1,0 +1,5 @@
+falkordb
+langgraph
+langchain-groq
+streamlit
+python-dotenv

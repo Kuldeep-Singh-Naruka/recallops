@@ -1,0 +1,13 @@
+# Runs FalkorDB locally.
+# 6379 = the database (Redis protocol), 3000 = FalkorDB Browser (visual UI)
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: falkordb
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+volumes:
+  falkordb_data:
