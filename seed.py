@@ -3,6 +3,7 @@
 import sys
 
 from db import get_graph, setup_indexes
+from memory import create_incident, resolve_incident
 
 # team -> on-call person
 TEAMS = {
@@ -51,6 +52,25 @@ DEPENDS_ON = [
     ("inventory-service", "orders-db"),
 ]
 
+# (service, symptom, fix, worked)
+PAST_INCIDENTS = [
+    ("redis-cache", "auth latency spike, connection pool exhausted", "Increase Redis connection pool size", True),
+    ("redis-cache", "login timeouts during sale traffic", "Restart redis-cache pods", False),
+    ("redis-cache", "login timeouts during sale traffic", "Increase Redis connection pool size", True),
+    ("payments-db", "slow queries, payment timeouts", "Add index on payments.created_at", True),
+    ("kafka", "consumer lag, order events delayed", "Scale order consumers to 6 replicas", True),
+    ("search-service", "500 errors right after deploy", "Roll back search-service to previous version", True),
+]
+
+
+def seed_history(tenant: str) -> None:
+    graph = get_graph(tenant)
+    if graph.query("MATCH (i:Incident) RETURN count(i)").result_set[0][0] > 0:
+        return
+    for service, symptom, fix, worked in PAST_INCIDENTS:
+        incident_id = create_incident(tenant, service, symptom)
+        resolve_incident(tenant, incident_id, fix, worked)
+
 
 def seed(tenant: str) -> None:
     setup_indexes(tenant)
@@ -81,6 +101,8 @@ def seed(tenant: str) -> None:
         """,
         {"rows": [{"src": a, "dst": b} for a, b in DEPENDS_ON]},
     )
+
+    seed_history(tenant)
 
     nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
     edges = graph.query("MATCH ()-[r]->() RETURN count(r)").result_set[0][0]
