@@ -5,8 +5,6 @@
 **Track 02: Agent Memory and Coordination** (primary) · also fits **Track 01: Agents That Act on Connected Data**
 Built for WeMakeDevs × FalkorDB **Graph Hacks** (Oct 2026) by [Kuldeep Singh Naruka](https://github.com/Kuldeep-Singh-Naruka).
 
-🔗 **Live demo:** _coming Sat 17 Oct_ · 🎬 **Video:** _link_ · ✍️ **Blog:** _link_
-
 ---
 
 ## The problem
