@@ -148,3 +148,80 @@ def get_history(tenant: str, session_id: str, limit: int = 20) -> list[dict]:
         {"sid": session_id, "limit": limit},
     ))
     return list(reversed(rows))
+
+
+# ---------- for the UI ----------
+
+def list_services(tenant: str) -> list[str]:
+    rows = get_graph(tenant).query("MATCH (s:Service) RETURN s.name ORDER BY s.name").result_set
+    return [r[0] for r in rows]
+
+
+def propose_fix(tenant: str, incident_id: str, fix: str) -> None:
+    get_graph(tenant).query(
+        """
+        MATCH (i:Incident {id: $id})
+        SET i.proposed_fix = $fix, i.status = 'awaiting_confirmation'
+        """,
+        {"id": incident_id, "fix": fix},
+    )
+
+
+def recent_incidents(tenant: str, limit: int = 10) -> list[dict]:
+    return _rows(get_graph(tenant).query(
+        """
+        MATCH (i:Incident)-[:AFFECTED]->(s:Service)
+        OPTIONAL MATCH (i)-[r:RESOLVED_BY]->(f:Fix)
+        RETURN i.id AS id, s.name AS service, i.symptom AS symptom, i.status AS status,
+               i.proposed_fix AS proposed_fix, i.created_at AS created_at,
+               collect({fix: f.text, worked: r.worked}) AS attempts
+        ORDER BY created_at DESC
+        LIMIT $limit
+        """,
+        {"limit": limit},
+    ))
+
+
+def top_fixes(tenant: str) -> list[dict]:
+    return _rows(get_graph(tenant).query(
+        """
+        MATCH (f:Fix)-[:FOR]->(s:Service)
+        RETURN f.text AS fix, collect(DISTINCT s.name) AS services,
+               f.success AS worked, f.fail AS failed
+        ORDER BY worked - failed DESC
+        """
+    ))
+
+
+GRAPH_VIEWS = {
+    "Service map": "MATCH p=()-[:OWNS|DEPENDS_ON]->() RETURN p",
+    "Incident memory": "MATCH p=(:Incident)-[:AFFECTED|RESOLVED_BY]->() RETURN p",
+    "One incident": "MATCH p=(:Incident {id: $id})-[*1..2]-() RETURN p",
+}
+
+
+def subgraph(tenant: str, view: str, incident_id: str = "") -> tuple[list[dict], list[dict]]:
+    nodes, edges = {}, {}
+    result = get_graph(tenant).query(GRAPH_VIEWS[view], {"id": incident_id})
+    for (path,) in result.result_set:
+        for n in path.nodes():
+            p = n.properties
+            label = n.labels[0]
+            name = p.get("name") or p.get("text") or p.get("id") or label
+            if label == "Step":
+                name = p["agent"] + ": " + p["text"][:40]
+            nodes[n.id] = {"id": n.id, "label": str(name)[:45], "group": label}
+        for e in path.edges():
+            edges[e.id] = {"from": e.src_node, "to": e.dest_node, "label": e.relation}
+    return list(nodes.values()), list(edges.values())
+
+
+def upstream_open_incidents(tenant: str, service: str, within_ms: int = 2 * 60 * 60 * 1000) -> list[dict]:
+    return _rows(get_graph(tenant).query(
+        """
+        MATCH (:Service {name: $svc})-[:DEPENDS_ON*1..3]->(d:Service)<-[:AFFECTED]-(i:Incident)
+        WHERE i.status <> 'resolved' AND i.created_at > $since
+        RETURN DISTINCT d.name AS service, i.id AS incident, i.symptom AS symptom
+        """,
+        {"svc": service, "since": _now() - within_ms},
+    ))

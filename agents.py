@@ -15,7 +15,10 @@ MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 def llm(schema):
     model = ChatGroq(model=MODEL, temperature=0, max_tokens=2048, reasoning_effort="low")
-    return model.with_structured_output(schema, method="json_schema")
+    strict = MODEL.startswith("openai/gpt-oss")
+    structured = model.with_structured_output(schema, method="json_schema", strict=strict)
+    # One retry covers the occasional malformed reply
+    return structured.with_retry(stop_after_attempt=2)
 
 
 class Triage(BaseModel):
@@ -61,6 +64,31 @@ Give the severity and a one-line summary."""
     impacts = ", ".join(ctx["impacts"]) or "nothing upstream"
     memory.add_step(tenant, incident_id, "triage", f"{out.severity}: {out.summary} Impacts: {impacts}.")
     return {"incident_id": incident_id}
+
+
+def dependency_scout(state: IncidentState) -> IncidentState:
+    tenant, service, incident_id = state["tenant"], state["service"], state["incident_id"]
+    open_upstream = [u for u in memory.upstream_open_incidents(tenant, service) if u["incident"] != incident_id]
+    if open_upstream:
+        found = "; ".join(f"{u['service']} has open {u['incident']} ({u['symptom']})" for u in open_upstream)
+        text = f"Upstream problem found: {found}"
+    else:
+        deps = memory.service_context(tenant, service)["depends_on"]
+        text = f"No open incidents upstream. Checked: {', '.join(deps) or 'no dependencies'}"
+    memory.add_step(tenant, incident_id, "dependency_scout", text)
+    return {}
+
+
+def memory_scout(state: IncidentState) -> IncidentState:
+    tenant, service, incident_id = state["tenant"], state["service"], state["incident_id"]
+    past = memory.recall_similar(tenant, service)
+    if past:
+        best = ", ".join(f"{p['fix']} ({p['success']} worked / {p['fail']} failed)" for p in past[:3])
+        text = f"Past fixes nearby: {best}"
+    else:
+        text = "No past fixes for this service or its dependencies"
+    memory.add_step(tenant, incident_id, "memory_scout", text)
+    return {}
 
 
 def investigator(state: IncidentState) -> IncidentState:
@@ -110,20 +138,54 @@ def resolver(state: IncidentState) -> IncidentState:
         f"Paged {owner.get('oncall', 'on-call')} ({owner.get('team', 'unknown team')}). "
         f"Proposed fix: {state['suggested_fix'].rstrip('.')}. Waiting for confirmation.",
     )
+    memory.propose_fix(tenant, incident_id, state["suggested_fix"])
     return {}
 
 
 builder = StateGraph(IncidentState)
 builder.add_node("triage", triage)
+builder.add_node("dependency_scout", dependency_scout)
+builder.add_node("memory_scout", memory_scout)
 builder.add_node("investigator", investigator)
 builder.add_node("resolver", resolver)
 
 builder.add_edge(START, "triage")
-builder.add_edge("triage", "investigator")
+builder.add_edge("triage", "dependency_scout")
+builder.add_edge("triage", "memory_scout")
+builder.add_edge(["dependency_scout", "memory_scout"], "investigator")
 builder.add_edge("investigator", "resolver")
 builder.add_edge("resolver", END)
 
 incident_graph = builder.compile()
+
+
+def answer_question(tenant: str, session_id: str, question: str) -> str:
+    history = memory.get_history(tenant, session_id)
+    incidents = "\n".join(
+        f"- {i['id']} {i['service']}: {i['symptom']} | status {i['status']} | "
+        f"tried: {[a for a in i['attempts'] if a['fix']]}"
+        for i in memory.recent_incidents(tenant, 15)
+    )
+    fixes = "\n".join(
+        f"- {f['fix']} on {f['services']}: worked {f['worked']}x, failed {f['failed']}x"
+        for f in memory.top_fixes(tenant)
+    )
+    system = f"""You are RecallOps, an on-call assistant. Answer only from this team's memory below.
+If the memory does not have the answer, say so. Keep answers short.
+
+Recent incidents:
+{incidents or 'none'}
+
+Known fixes:
+{fixes or 'none'}"""
+
+    messages = [("system", system)] + [(m["role"], m["text"]) for m in history] + [("user", question)]
+    model = ChatGroq(model=MODEL, temperature=0, max_tokens=1024, reasoning_effort="low")
+    reply = model.invoke(messages).content
+
+    memory.save_message(tenant, session_id, "user", question)
+    memory.save_message(tenant, session_id, "assistant", reply)
+    return reply
 
 
 def run_incident(tenant: str, service: str, symptom: str) -> IncidentState:

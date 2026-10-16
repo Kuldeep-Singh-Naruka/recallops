@@ -1,5 +1,3 @@
-# Seeds the service map (synthetic data).
-# Usage: python seed.py [tenant]
 import sys
 
 from db import get_graph, setup_indexes
@@ -70,13 +68,13 @@ def seed_history(tenant: str) -> None:
     for service, symptom, fix, worked in PAST_INCIDENTS:
         incident_id = create_incident(tenant, service, symptom)
         resolve_incident(tenant, incident_id, fix, worked)
+    graph.query("MATCH (i:Incident) SET i.created_at = i.created_at - $week", {"week": 7 * 24 * 3600 * 1000})
 
 
-def seed(tenant: str) -> None:
+def seed(tenant: str, with_history: bool = True) -> None:
     setup_indexes(tenant)
     graph = get_graph(tenant)
 
-    # MERGE so seed can be re-run without duplicates
     graph.query(
         """
         UNWIND $rows AS row
@@ -102,7 +100,8 @@ def seed(tenant: str) -> None:
         {"rows": [{"src": a, "dst": b} for a, b in DEPENDS_ON]},
     )
 
-    seed_history(tenant)
+    if with_history:
+        seed_history(tenant)
 
     nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]
     edges = graph.query("MATCH ()-[r]->() RETURN count(r)").result_set[0][0]
