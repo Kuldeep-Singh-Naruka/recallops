@@ -1,3 +1,4 @@
+import hashlib
 import re
 import time
 import uuid
@@ -90,23 +91,61 @@ def get_steps(tenant: str, incident_id: str) -> list[dict]:
 # ---------- procedural ----------
 
 def _fix_id(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60]
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if len(slug) <= 60:
+        return slug
+    # long fixes keep a hash so two different ones never share a prefix id
+    return slug[:51] + "-" + hashlib.sha1(slug.encode()).hexdigest()[:8]
 
 
-def resolve_incident(tenant: str, incident_id: str, fix: str, worked: bool = True) -> None:
-    get_graph(tenant).query(
+def resolve_incident(tenant: str, incident_id: str, fix: str, worked: bool = True) -> bool:
+    # WHERE + SET in one query = exactly-once: a second click (or a second engineer) matches nothing
+    result = get_graph(tenant).query(
         """
         MATCH (i:Incident {id: $id})-[:AFFECTED]->(s:Service)
+        WHERE i.status = 'awaiting_confirmation'
         MERGE (f:Fix {id: $fix_id})
           ON CREATE SET f.text = $fix, f.success = 0, f.fail = 0
         MERGE (f)-[:FOR]->(s)
         CREATE (i)-[:RESOLVED_BY {worked: $worked}]->(f)
-        SET i.status = CASE WHEN $worked THEN 'resolved' ELSE 'open' END,
+        SET i.status = CASE WHEN $worked THEN 'resolved' ELSE 'retrying' END,
             f.success = f.success + CASE WHEN $worked THEN 1 ELSE 0 END,
             f.fail = f.fail + CASE WHEN $worked THEN 0 ELSE 1 END
+        RETURN count(i)
         """,
         {"id": incident_id, "fix_id": _fix_id(fix), "fix": fix, "worked": worked},
     )
+    return result.result_set[0][0] > 0
+
+
+def tried_fixes(tenant: str, incident_id: str) -> list[str]:
+    rows = get_graph(tenant).query(
+        "MATCH (:Incident {id: $id})-[:RESOLVED_BY {worked: false}]->(f:Fix) RETURN f.text",
+        {"id": incident_id},
+    ).result_set
+    return [r[0] for r in rows]
+
+
+def get_incident(tenant: str, incident_id: str) -> dict | None:
+    rows = _rows(get_graph(tenant).query(
+        """
+        MATCH (i:Incident {id: $id})-[:AFFECTED]->(s:Service)
+        RETURN i.id AS id, s.name AS service, i.symptom AS symptom, i.status AS status
+        """,
+        {"id": incident_id},
+    ))
+    return rows[0] if rows else None
+
+
+def set_status(tenant: str, incident_id: str, status: str) -> None:
+    get_graph(tenant).query("MATCH (i:Incident {id: $id}) SET i.status = $st", {"id": incident_id, "st": status})
+
+
+def service_map(tenant: str) -> dict[str, list[str]]:
+    rows = get_graph(tenant).query(
+        "MATCH (a:Service)-[:DEPENDS_ON]->(b:Service) RETURN a.name, collect(b.name)"
+    ).result_set
+    return {a: deps for a, deps in rows}
 
 
 def recall_similar(tenant: str, service: str) -> list[dict]:

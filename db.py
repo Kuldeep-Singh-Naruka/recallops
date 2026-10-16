@@ -1,4 +1,5 @@
 import os
+import re
 
 from dotenv import load_dotenv
 from falkordb import FalkorDB
@@ -17,6 +18,11 @@ GRAPH_PREFIX = "recallops_"
 
 def get_graph(tenant: str):
     return db.select_graph(GRAPH_PREFIX + tenant)
+
+
+def valid_tenant_name(name: str) -> bool:
+    # tenant name becomes part of the graph key, so keep it boring
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{1,30}", name))
 
 
 def list_tenants() -> list[str]:

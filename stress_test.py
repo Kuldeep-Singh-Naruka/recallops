@@ -42,6 +42,8 @@ if __name__ == "__main__":
     seed(TENANT, with_history=False)
 
     incidents = [memory.create_incident(TENANT, "redis-cache", f"load test {i}") for i in range(N)]
+    for i in incidents:
+        memory.propose_fix(TENANT, i, FIX)
     memory.resolve_incident(TENANT, incidents[0], FIX)  # make sure the Fix node exists
 
     print(f"\n{N} workers writing to the same Fix node at the same time:\n")
@@ -54,5 +56,14 @@ if __name__ == "__main__":
         list(pool.map(lambda n: memory.add_step(TENANT, shared, f"agent-{n % 5}", f"finding {n}"), range(N)))
     added = len(memory.get_steps(TENANT, shared)) - before
     print(f"{'parallel add_step':<28} expected +{N:<4} got +{added:<4} {'OK' if added == N else 'MISSING'}")
+
+    # N engineers click "Fix worked" on the SAME incident at once: it must count exactly once
+    one = memory.create_incident(TENANT, "redis-cache", "double click test")
+    memory.propose_fix(TENANT, one, FIX)
+    before = fix_count()
+    with ThreadPoolExecutor(max_workers=N) as pool:
+        applied = sum(pool.map(lambda _: memory.resolve_incident(TENANT, one, FIX), range(N)))
+    got = fix_count() - before
+    print(f"{'same incident, N confirms':<28} expected +1    got +{got:<4} {'OK' if got == 1 and applied == 1 else 'DOUBLE COUNTED'}")
 
     get_graph(TENANT).delete()  # clean up the test tenant

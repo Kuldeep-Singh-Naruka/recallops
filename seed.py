@@ -1,7 +1,7 @@
 import sys
 
 from db import get_graph, setup_indexes
-from memory import create_incident, resolve_incident
+from memory import create_incident, propose_fix, resolve_incident
 
 # team -> on-call person
 TEAMS = {
@@ -110,8 +110,14 @@ def seed_history(tenant: str) -> None:
         return
     for service, symptom, fix, worked in PAST_INCIDENTS:
         incident_id = create_incident(tenant, service, symptom)
+        propose_fix(tenant, incident_id, fix)
         resolve_incident(tenant, incident_id, fix, worked)
-    graph.query("MATCH (i:Incident) SET i.created_at = i.created_at - $week", {"week": 7 * 24 * 3600 * 1000})
+    graph.query(
+        # history is closed: the failed one was handed to humans back then
+        "MATCH (i:Incident) SET i.created_at = i.created_at - $week, "
+        "i.status = CASE WHEN i.status = 'retrying' THEN 'escalated' ELSE i.status END",
+        {"week": 7 * 24 * 3600 * 1000},
+    )
 
 
 def seed(tenant: str, with_history: bool = True, template: str = "ecommerce") -> None:
