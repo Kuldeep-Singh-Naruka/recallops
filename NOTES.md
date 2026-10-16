@@ -17,3 +17,4 @@
 
 ## Step 5 — Concurrency
 - Two scouts (dependency + memory) run in parallel after triage and write to the same incident; investigator waits for both. `stress_test.py` shows 50 parallel writes stay correct because counters are updated inside FalkorDB, not read-modify-write in Python.
+- Added a second architecture template (streaming) so a new tenant gets its own service map, not a copy of acme.

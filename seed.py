@@ -50,6 +50,49 @@ DEPENDS_ON = [
     ("inventory-service", "orders-db"),
 ]
 
+# Second architecture (a video streaming company), so tenants can look different
+STREAMING_TEAMS = {
+    "playback": "@kabir",
+    "content": "@meera",
+    "discovery": "@tanvi",
+    "infra": "@rohan",
+}
+
+STREAMING_SERVICES = {
+    "web-player": "playback",
+    "playback-api": "playback",
+    "stream-router": "playback",
+    "user-profile": "playback",
+    "transcoder": "content",
+    "content-catalog": "content",
+    "recommendation-engine": "discovery",
+    "cdn-edge": "infra",
+    "object-storage": "infra",
+    "postgres-main": "infra",
+    "memcached": "infra",
+}
+
+STREAMING_DEPENDS_ON = [
+    ("web-player", "playback-api"),
+    ("web-player", "cdn-edge"),
+    ("web-player", "recommendation-engine"),
+    ("playback-api", "stream-router"),
+    ("playback-api", "user-profile"),
+    ("playback-api", "content-catalog"),
+    ("stream-router", "cdn-edge"),
+    ("cdn-edge", "object-storage"),
+    ("transcoder", "object-storage"),
+    ("content-catalog", "postgres-main"),
+    ("user-profile", "postgres-main"),
+    ("recommendation-engine", "content-catalog"),
+    ("recommendation-engine", "memcached"),
+]
+
+TEMPLATES = {
+    "ecommerce": (TEAMS, SERVICES, DEPENDS_ON),
+    "streaming": (STREAMING_TEAMS, STREAMING_SERVICES, STREAMING_DEPENDS_ON),
+}
+
 # (service, symptom, fix, worked)
 PAST_INCIDENTS = [
     ("redis-cache", "auth latency spike, connection pool exhausted", "Increase Redis connection pool size", True),
@@ -71,7 +114,8 @@ def seed_history(tenant: str) -> None:
     graph.query("MATCH (i:Incident) SET i.created_at = i.created_at - $week", {"week": 7 * 24 * 3600 * 1000})
 
 
-def seed(tenant: str, with_history: bool = True) -> None:
+def seed(tenant: str, with_history: bool = True, template: str = "ecommerce") -> None:
+    teams, services, depends_on = TEMPLATES[template]
     setup_indexes(tenant)
     graph = get_graph(tenant)
 
@@ -85,8 +129,8 @@ def seed(tenant: str, with_history: bool = True) -> None:
         """,
         {
             "rows": [
-                {"service": s, "team": t, "oncall": TEAMS[t]}
-                for s, t in SERVICES.items()
+                {"service": s, "team": t, "oncall": teams[t]}
+                for s, t in services.items()
             ]
         },
     )
@@ -97,10 +141,11 @@ def seed(tenant: str, with_history: bool = True) -> None:
         MATCH (a:Service {name: row.src}), (b:Service {name: row.dst})
         MERGE (a)-[:DEPENDS_ON]->(b)
         """,
-        {"rows": [{"src": a, "dst": b} for a, b in DEPENDS_ON]},
+        {"rows": [{"src": a, "dst": b} for a, b in depends_on]},
     )
 
-    if with_history:
+    # past incidents only exist for the ecommerce services
+    if with_history and template == "ecommerce":
         seed_history(tenant)
 
     nodes = graph.query("MATCH (n) RETURN count(n)").result_set[0][0]

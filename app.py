@@ -20,8 +20,9 @@ tenant = st.sidebar.selectbox("Tenant", tenants)
 
 with st.sidebar.expander("New tenant"):
     new_name = st.text_input("Name", placeholder="globex")
+    template = st.selectbox("Architecture", ["streaming", "ecommerce"])
     if st.button("Create (empty memory)") and new_name:
-        seed(new_name.strip().lower(), with_history=False)
+        seed(new_name.strip().lower(), with_history=False, template=template)
         st.rerun()
 
 session_id = st.sidebar.text_input("Chat session", value="oncall-shift-1")
