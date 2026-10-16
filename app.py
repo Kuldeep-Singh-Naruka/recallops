@@ -102,8 +102,9 @@ with incident_tab:
 
     escalated = [i for i in memory.recent_incidents(tenant, 20) if i["status"] == "escalated"]
     for inc in escalated:
+        n = len([a for a in inc["attempts"] if a["fix"]])
         st.warning(f"**{inc['id']}** · {inc['service']} · escalated to humans after "
-                   f"{len([a for a in inc['attempts'] if a['fix']])} failed fixes")
+                   f"{n} failed fix{'es' if n != 1 else ''}")
 
 # ---------- memory: what the agents have learned ----------
 
@@ -169,7 +170,9 @@ with graph_tab:
             {{nodes: {{shape: "dot", size: 14, font: {{color: "#eee", size: 12}}}},
               edges: {{arrows: "to", color: "#666", font: {{color: "#aaa", size: 9, strokeWidth: 0}}}},
               physics: {{stabilization: true}}}});
-          net.once("stabilizationIterationsDone", () => net.fit());
+          // the stabilization event can fire before this line runs, so also fit on a timer
+          net.once("stabilized", () => net.fit());
+          setTimeout(() => net.fit(), 1200);
         </script>
         """,
         height=620,

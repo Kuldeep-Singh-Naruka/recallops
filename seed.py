@@ -113,9 +113,9 @@ def seed_history(tenant: str) -> None:
         propose_fix(tenant, incident_id, fix)
         resolve_incident(tenant, incident_id, fix, worked)
     graph.query(
-        # history is closed: the failed one was handed to humans back then
+        # history is over: the failed one is closed, not a live escalation
         "MATCH (i:Incident) SET i.created_at = i.created_at - $week, "
-        "i.status = CASE WHEN i.status = 'retrying' THEN 'escalated' ELSE i.status END",
+        "i.status = CASE WHEN i.status = 'retrying' THEN 'closed' ELSE i.status END",
         {"week": 7 * 24 * 3600 * 1000},
     )
 
