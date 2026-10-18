@@ -5,6 +5,9 @@
 **Track 02: Agent Memory and Coordination** (primary) · also fits **Track 01: Agents That Act on Connected Data**
 Built for WeMakeDevs × FalkorDB **Graph Hacks** (Oct 2026) by [Kuldeep Singh Naruka](https://github.com/Kuldeep-Singh-Naruka).
 
+🔗 **Live demo:** https://recallops-falkordb.streamlit.app (Streamlit Community Cloud + FalkorDB Cloud)  
+🎬 **Demo video:** https://youtu.be/wkUhq1_z1dI
+
 ---
 
 ## The problem
